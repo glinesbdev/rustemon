@@ -1,23 +1,12 @@
-use std::env;
+pub use crate::request::*;
+pub use crate::responses::*;
+pub use crate::responses::errors::*;
+pub use crate::shared::*;
 
-use reqwest::{
-    header::{ACCEPT, CONTENT_TYPE},
-    Client,
-};
+pub mod card;
+pub mod request;
+pub mod responses;
+pub mod set;
+pub mod shared;
 
-pub(crate) type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-pub async fn request() -> Result<String> {
-    let client = Client::new();
-    let result = client
-        .get("https://api.pokemontcg.io/v2/cards")
-        .header("X-Api-Key", env::var("PTCG_API_KEY")?)
-        .header(CONTENT_TYPE, "application/json")
-        .header(ACCEPT, "json")
-        .send()
-        .await?
-        .text()
-        .await?;
-
-    Ok(result)
-}
+pub type ResponseResult<T> = std::result::Result<T, ResponseError>;

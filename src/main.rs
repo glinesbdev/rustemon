@@ -1,8 +1,9 @@
 use rustemon::*;
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", request().await?);
+#[tokio::main]
+async fn main() -> std::result::Result<(), ResponseError> {
+    let data: SetsResponse = Request::new("sets").query("series:base").search().await?;
+    println!("{data:#?}");
 
     Ok(())
 }
