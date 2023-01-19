@@ -1,13 +1,13 @@
 use crate::{request::Requester, shared::*, Many, ResponseResult, SearchOptions, Single};
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug, Default, Clone)]
+#[derive(Deserialize, Debug, Default)]
 pub struct SetImage {
     pub symbol: String,
     pub logo: String,
 }
 
-#[derive(Deserialize, Debug, Default, Clone)]
+#[derive(Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SetData {
     pub id: String,

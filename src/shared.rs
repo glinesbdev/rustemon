@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug, Default, Clone)]
+#[derive(Deserialize, Debug, Default)]
 #[serde(default)]
 pub struct Legality {
     pub standard: String,
