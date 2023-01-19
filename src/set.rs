@@ -33,7 +33,7 @@ impl Set {
 
     pub async fn search(options: SearchOptions) -> ResponseResult<Many<SetData>> {
         let mut requester = Requester::new("sets");
-        requester.parse_options(options);
+        requester.options = options;
 
         Ok(requester.resolve::<Many<SetData>>().await?)
     }

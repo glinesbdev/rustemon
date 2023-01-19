@@ -154,7 +154,7 @@ impl Card {
 
     pub async fn search(options: SearchOptions) -> ResponseResult<Many<CardData>> {
         let mut requester = Requester::new("cards");
-        requester.parse_options(options);
+        requester.options = options;
 
         Ok(requester.resolve::<Many<CardData>>().await?)
     }

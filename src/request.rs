@@ -63,26 +63,22 @@ impl SearchOptions {
 
 #[derive(Default)]
 pub struct Requester {
-    options: SearchOptions,
     client: Client,
     endpoint: String,
+    pub options: SearchOptions,
 }
 
 impl Requester {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
-            options: SearchOptions::new(),
             client: Client::new(),
             endpoint: endpoint.into(),
+            options: SearchOptions::new(),
         }
     }
 
     pub fn page(&mut self, page: u16) {
         self.options.page = page
-    }
-
-    pub fn parse_options(&mut self, options: SearchOptions) {
-        self.options = options
     }
 
     pub async fn resolve<T: serde::de::DeserializeOwned>(&self) -> ResponseResult<T> {
