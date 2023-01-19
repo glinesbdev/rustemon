@@ -1,11 +1,10 @@
 use crate::{
-    request::{MultiRequester, Requester},
+    request::{MultiRequester, Requester, SearchOptions},
     set::SetData,
     shared::Legality,
-    Many, ResponseResult,
+    Many, ResponseResult, Single, TOTAL_CARD_PAGES,
 };
 use serde::Deserialize;
-use std::collections::HashMap;
 
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
@@ -150,13 +149,20 @@ pub struct Card;
 
 impl Card {
     pub async fn all() -> ResponseResult<Vec<CardData>> {
-        MultiRequester::resolve_n_pages::<CardData>("cards", 64).await
+        MultiRequester::resolve_n_pages::<CardData>("cards", TOTAL_CARD_PAGES).await
     }
 
-    pub async fn search(options: &HashMap<&str, &str>) -> ResponseResult<Many<CardData>> {
+    pub async fn search(options: SearchOptions) -> ResponseResult<Many<CardData>> {
         let mut requester = Requester::new("cards");
         requester.parse_options(options);
 
         Ok(requester.resolve::<Many<CardData>>().await?)
+    }
+
+    pub async fn find(id: &str) -> ResponseResult<CardData> {
+        Ok(Requester::new(format!("cards/{id}"))
+            .resolve::<Single<CardData>>()
+            .await?
+            .data)
     }
 }

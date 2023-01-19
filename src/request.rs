@@ -1,17 +1,69 @@
-use crate::{Many, RequestError, ResponseError, ResponseResult, BASE_URL};
+use crate::{Many, RequestError, ResponseError, ResponseResult, BASE_URL, MAX_PAGE_SIZE};
 use reqwest::{
     header::{ACCEPT, CONTENT_TYPE},
     Client, Response, StatusCode,
 };
-use std::{collections::HashMap, env};
+use std::env;
 use tokio::task::JoinHandle;
 
-#[derive(Default)]
-pub struct Requester {
+pub struct SearchOptions {
     q: String,
     page: u16,
     page_size: u8,
     order_by: String,
+    select: String,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            q: Default::default(),
+            page: 1,
+            page_size: MAX_PAGE_SIZE,
+            order_by: Default::default(),
+            select: Default::default(),
+        }
+    }
+}
+
+impl SearchOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn query(&mut self, query: impl Into<String>) -> &mut Self {
+        self.q = query.into();
+        self
+    }
+
+    pub fn page(&mut self, page: u16) -> &mut Self {
+        self.page = page;
+        self
+    }
+
+    pub fn page_size(&mut self, page_size: u8) -> &mut Self {
+        self.page_size = if page_size > MAX_PAGE_SIZE {
+            MAX_PAGE_SIZE
+        } else {
+            page_size
+        };
+        self
+    }
+
+    pub fn order_by(&mut self, order_by: impl Into<String>) -> &mut Self {
+        self.order_by = order_by.into();
+        self
+    }
+
+    pub fn select(&mut self, select: impl Into<String>) -> &mut Self {
+        self.select = select.into();
+        self
+    }
+}
+
+#[derive(Default)]
+pub struct Requester {
+    options: SearchOptions,
     client: Client,
     endpoint: String,
 }
@@ -19,39 +71,18 @@ pub struct Requester {
 impl Requester {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
-            q: Default::default(),
-            page: 1,
-            page_size: 250,
-            order_by: Default::default(),
+            options: SearchOptions::new(),
             client: Client::new(),
             endpoint: endpoint.into(),
         }
     }
 
     pub fn page(&mut self, page: u16) {
-        self.page = page
+        self.options.page = page
     }
 
-    pub fn parse_options(&mut self, options: &HashMap<&str, &str>) {
-        if let Some(query) = options.get("q") {
-            self.q = query.to_string();
-        }
-
-        if let Some(page) = options.get("page") {
-            if let Ok(page) = page.parse() {
-                self.page = page
-            }
-        }
-
-        if let Some(page_size) = options.get("pageSize") {
-            if let Ok(size) = page_size.parse() {
-                self.page_size = size;
-            }
-        }
-
-        if let Some(order) = options.get("orderBy") {
-            self.order_by = order.to_string();
-        }
+    pub fn parse_options(&mut self, options: SearchOptions) {
+        self.options = options
     }
 
     pub async fn resolve<T: serde::de::DeserializeOwned>(&self) -> ResponseResult<T> {
@@ -83,8 +114,13 @@ impl Requester {
 
     fn build_url(&self) -> String {
         format!(
-            "{}?query={}&page={}&pageSize={}&orderBy={}",
-            self.endpoint, self.q, self.page, self.page_size, self.order_by
+            "{}?query={}&page={}&pageSize={}&orderBy={}&select={}",
+            self.endpoint,
+            self.options.q,
+            self.options.page,
+            self.options.page_size,
+            self.options.order_by,
+            self.options.select
         )
     }
 
@@ -107,7 +143,7 @@ pub struct MultiRequester;
 impl MultiRequester {
     pub async fn resolve_n_pages<T>(endpoint: &'static str, pages: u16) -> ResponseResult<Vec<T>>
     where
-        T: 'static + serde::de::DeserializeOwned + Send + Default,
+        T: serde::de::DeserializeOwned + Send + Default + 'static,
     {
         let mut threads: Vec<JoinHandle<Vec<T>>> = Vec::new();
 
@@ -115,6 +151,7 @@ impl MultiRequester {
             let thread: JoinHandle<Vec<T>> = tokio::spawn(async move {
                 let mut requester = Requester::new(endpoint);
                 requester.page(page);
+
                 let results = match requester.resolve::<Many<T>>().await {
                     Ok(results) => results.data,
                     Err(_) => Vec::new(),

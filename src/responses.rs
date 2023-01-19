@@ -5,7 +5,7 @@ pub mod errors;
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
 pub struct Single<T> {
-    pub data: Option<T>,
+    pub data: T,
 }
 
 #[derive(Deserialize, Debug, Default)]
