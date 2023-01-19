@@ -1,170 +1,142 @@
-use crate::{
-    responses::errors::{RequestError, ResponseError},
-    ResponseResult,
-};
+use crate::{Many, RequestError, ResponseError, ResponseResult, BASE_URL};
 use reqwest::{
     header::{ACCEPT, CONTENT_TYPE},
-    Client, IntoUrl, StatusCode,
+    Client, Response, StatusCode,
 };
-use std::{env, marker::PhantomData};
-use url::Url;
+use std::{collections::HashMap, env};
+use tokio::task::JoinHandle;
 
-#[derive(Debug)]
-pub struct Request<T> {
-    q: Option<String>,
-    page: Option<u16>,
-    page_size: Option<u8>,
-    order_by: Option<String>,
-    select: Option<String>,
-    endpoint: String,
+#[derive(Default)]
+pub struct Requester {
+    q: String,
+    page: u16,
+    page_size: u8,
+    order_by: String,
     client: Client,
-    phantom: PhantomData<T>,
+    endpoint: String,
 }
 
-impl<T> Default for Request<T> {
-    fn default() -> Self {
-        Self {
-            q: Default::default(),
-            page: Default::default(),
-            page_size: Default::default(),
-            order_by: Default::default(),
-            select: Default::default(),
-            endpoint: Default::default(),
-            client: Client::default(),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T> Request<T>
-where
-    T: serde::de::DeserializeOwned,
-{
+impl Requester {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
+            q: Default::default(),
+            page: 1,
+            page_size: 250,
+            order_by: Default::default(),
+            client: Client::new(),
             endpoint: endpoint.into(),
-            ..Default::default()
         }
     }
 
-    pub fn query(&mut self, query: impl Into<String>) -> &mut Self {
-        self.q = Some(query.into());
-        self
+    pub fn page(&mut self, page: u16) {
+        self.page = page
     }
 
-    pub fn page(&mut self, page: u16) -> &mut Self {
-        self.page = Some(page);
-        self
-    }
+    pub fn parse_options(&mut self, options: &HashMap<&str, &str>) {
+        if let Some(query) = options.get("q") {
+            self.q = query.to_string();
+        }
 
-    pub fn page_size(&mut self, size: u8) -> &mut Self {
-        self.page_size = Some(size);
-        self
-    }
-
-    pub fn order_by(&mut self, order: impl Into<String>) -> &mut Self {
-        self.order_by = Some(order.into());
-        self
-    }
-
-    pub fn select(&mut self, select: impl Into<String>) -> &mut Self {
-        self.select = Some(select.into());
-        self
-    }
-
-    pub async fn find(&self, id: impl Into<String>) -> ResponseResult<T> {
-        let url = match self.build_url(&format!(
-            "https://api.pokemontcg.io/v2/{}/{}",
-            self.endpoint,
-            id.into()
-        )) {
-            Ok(url) => url,
-            Err(error) => {
-                return Err(ResponseError::from(error));
+        if let Some(page) = options.get("page") {
+            if let Ok(page) = page.parse() {
+                self.page = page
             }
-        };
+        }
 
-        Ok(self.send(url).await?)
-    }
-
-    pub async fn search(&self) -> ResponseResult<T> {
-        let url = match self.build_url(&format!("https://api.pokemontcg.io/v2/{}", self.endpoint)) {
-            Ok(url) => url,
-            Err(error) => {
-                return Err(ResponseError::from(error));
+        if let Some(page_size) = options.get("pageSize") {
+            if let Ok(size) = page_size.parse() {
+                self.page_size = size;
             }
-        };
+        }
 
-        println!("{url}");
-
-        Ok(self.send(url).await?)
+        if let Some(order) = options.get("orderBy") {
+            self.order_by = order.to_string();
+        }
     }
 
-    fn build_url(&self, base: &str) -> Result<Url, url::ParseError> {
-        Url::parse_with_params(
-            base,
-            &[
-                ("q", self.q.clone().unwrap_or_default()),
-                ("page", self.page.unwrap_or_else(|| 1).to_string()),
-                (
-                    "pageSize",
-                    self.page_size.unwrap_or_else(|| 255).to_string(),
-                ),
-                ("orderBy", self.order_by.clone().unwrap_or_default()),
-                ("select", self.select.clone().unwrap_or_default()),
-            ],
+    pub async fn resolve<T: serde::de::DeserializeOwned>(&self) -> ResponseResult<T> {
+        let response = self.api_response().await?;
+        let response_status = response.status();
+
+        match response_status {
+            StatusCode::OK => match response.json::<T>().await {
+                Ok(parsed) => Ok(parsed),
+                Err(err) => {
+                    return Err(ResponseError::from(err));
+                }
+            },
+            _ => {
+                return Err(ResponseError::from(RequestError::new(
+                    response.text().await?,
+                    response_status,
+                )));
+            }
+        }
+    }
+
+    fn api_key(&self) -> Option<String> {
+        match env::var("POKEMON_API_KEY") {
+            Ok(key) => Some(key),
+            Err(_) => None,
+        }
+    }
+
+    fn build_url(&self) -> String {
+        format!(
+            "{}?query={}&page={}&pageSize={}&orderBy={}",
+            self.endpoint, self.q, self.page, self.page_size, self.order_by
         )
     }
 
-    async fn send(&self, url: impl IntoUrl) -> ResponseResult<T> {
-        let api_key = match env::var("POKEMON_API_KEY") {
-            Ok(key) => key,
-            Err(err) => {
-                return Err(ResponseError::from(format!(
-                    "{}: POKEMON_API_KEY",
-                    err.to_string()
-                )));
-            }
-        };
-
+    async fn api_response(&self) -> reqwest::Result<Response> {
         let response = self
             .client
-            .get(url)
-            .header("X-Api-Key", api_key)
+            .get(format!("{}/{}", BASE_URL, self.build_url()))
             .header(CONTENT_TYPE, "application/json")
-            .header(ACCEPT, "application/json")
-            .send()
-            .await?;
+            .header(ACCEPT, "application/json");
 
-        let response_status = response.status();
+        match self.api_key() {
+            Some(api_key) => response.header("X-Api-Key", api_key).send().await,
+            None => response.send().await,
+        }
+    }
+}
 
-        let result: ResponseResult<T> = match response_status {
-            StatusCode::OK => match response.json::<T>().await {
-                Ok(parsed) => Ok(parsed),
-                Err(err) => Err(ResponseError::from(err)),
-            },
-            StatusCode::BAD_REQUEST
-            | StatusCode::PAYMENT_REQUIRED
-            | StatusCode::FORBIDDEN
-            | StatusCode::NOT_FOUND
-            | StatusCode::TOO_MANY_REQUESTS
-            | StatusCode::UNAUTHORIZED
-            | StatusCode::INTERNAL_SERVER_ERROR
-            | StatusCode::BAD_GATEWAY
-            | StatusCode::SERVICE_UNAVAILABLE
-            | StatusCode::GATEWAY_TIMEOUT => Err(ResponseError::from(RequestError::new(
-                response.text().await?,
-                response_status,
-            ))),
-            _ => {
-                let error = format!(
-                    "Unknown error: please contact crate owners: {}",
-                    env!("CARGO_PKG_AUTHORS")
-                );
-                Err(ResponseError::from(error))
-            }
-        };
+pub struct MultiRequester;
 
-        result
+impl MultiRequester {
+    pub async fn resolve_n_pages<T>(endpoint: &'static str, pages: u16) -> ResponseResult<Vec<T>>
+    where
+        T: 'static + serde::de::DeserializeOwned + Send + Default,
+    {
+        let mut threads: Vec<JoinHandle<Vec<T>>> = Vec::new();
+
+        for page in (1..pages).into_iter() {
+            let thread: JoinHandle<Vec<T>> = tokio::spawn(async move {
+                let mut requester = Requester::new(endpoint);
+                requester.page(page);
+                let results = match requester.resolve::<Many<T>>().await {
+                    Ok(results) => results.data,
+                    Err(_) => Vec::new(),
+                };
+
+                results
+            });
+
+            threads.push(thread);
+        }
+
+        let results = futures::future::join_all(threads)
+            .await
+            .into_iter()
+            .flat_map(|card_data| -> Vec<T> {
+                match card_data {
+                    Ok(cards) => cards,
+                    Err(_) => Vec::new(),
+                }
+            })
+            .collect();
+
+        Ok(results)
     }
 }

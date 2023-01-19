@@ -1,5 +1,11 @@
-use crate::{set::Set, shared::Legality};
+use crate::{
+    request::{MultiRequester, Requester},
+    set::SetData,
+    shared::Legality,
+    Many, ResponseResult,
+};
 use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
@@ -101,6 +107,7 @@ pub struct CardMarket {
 }
 
 #[derive(Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct CardImage {
     pub small: String,
     pub large: String,
@@ -108,7 +115,7 @@ pub struct CardImage {
 
 #[derive(Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase", default)]
-pub struct Card {
+pub struct CardData {
     pub id: String,
     pub name: String,
     pub supertype: String,
@@ -126,7 +133,7 @@ pub struct Card {
     pub resistances: Vec<Resistance>,
     pub retreat_cost: Vec<String>,
     pub converted_retreat_cost: u8,
-    pub set: Set,
+    pub set: SetData,
     pub number: String,
     pub artist: String,
     pub rarity: String,
@@ -137,4 +144,19 @@ pub struct Card {
     pub images: CardImage,
     pub tcgplayer: TcgPlayer,
     pub cardmarket: CardMarket,
+}
+
+pub struct Card;
+
+impl Card {
+    pub async fn all() -> ResponseResult<Vec<CardData>> {
+        MultiRequester::resolve_n_pages::<CardData>("cards", 64).await
+    }
+
+    pub async fn search(options: &HashMap<&str, &str>) -> ResponseResult<Many<CardData>> {
+        let mut requester = Requester::new("cards");
+        requester.parse_options(options);
+
+        Ok(requester.resolve::<Many<CardData>>().await?)
+    }
 }
